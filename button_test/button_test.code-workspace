@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "Radio",
+			"path": "../Radio"
+		},
+		{
+			"name": "RadioRX",
+			"path": "../RadioRX"
+		}
+	],
+	"settings": {}
+}
