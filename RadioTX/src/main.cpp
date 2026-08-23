@@ -26,15 +26,10 @@ void setup() {
 
 void loop() {
     counter++;
-
-    // Спочатку очищаємо всі 64 байти
+    
     memset(packet, ' ', sizeof(packet));
 
-    // Записуємо номер пакета на початок
     snprintf((char*)packet, sizeof(packet), "PACKET:%lu", counter);
-
-    // snprintf додає \0, а нам треба фізично передати всі 64 байти
-    // Решта масиву вже заповнена пробілами
 
     Serial.print("Sending: PACKET:");
     Serial.println(counter);
