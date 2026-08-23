@@ -5,39 +5,36 @@
 SX1276 radio = new Module(18, 26, 23, RADIOLIB_NC);
 
 uint8_t packet[64];
-unsigned long counter = 0;
 
 void setup() {
     Serial.begin(115200);
 
     SPI.begin(5, 19, 27, 18);
 
-    int state = radio.begin(867.5, 125.0, 6);
-    radio.implicitHeader(64);
+    memset(packet, '!', sizeof(packet));
+
+    int state = radio.beginFSK(915.0, 100.0, 100.0, 125.0);
 
     if (state == RADIOLIB_ERR_NONE) {
-        Serial.println("LoRa initialized!");
+        Serial.println("FSK initialized!");
     } else {
-        Serial.print("LoRa init failed: ");
+        Serial.print("FSK init failed: ");
+        Serial.println(state);
+        while (true);
+    }
+
+    state = radio.fixedPacketLengthMode(64);
+
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("Fixed packet mode failed: ");
         Serial.println(state);
         while (true);
     }
 }
 
 void loop() {
-    counter++;
-
-    // Спочатку очищаємо всі 64 байти
-    memset(packet, ' ', sizeof(packet));
-
-    // Записуємо номер пакета на початок
-    snprintf((char*)packet, sizeof(packet), "PACKET:%lu", counter);
-
-    // snprintf додає \0, а нам треба фізично передати всі 64 байти
-    // Решта масиву вже заповнена пробілами
-
-    Serial.print("Sending: PACKET:");
-    Serial.println(counter);
+    Serial.write(packet, sizeof(packet));
+    Serial.println();
 
     unsigned long start = micros();
 
@@ -57,5 +54,5 @@ void loop() {
         Serial.println(state);
     }
 
-    delay(5000);
+    delay(1000);
 }
