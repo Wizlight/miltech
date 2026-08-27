@@ -13,7 +13,7 @@ void setup() {
 
     memset(packet, '!', sizeof(packet));
 
-    int state = radio.beginFSK(915.0, 100.0, 100.0, 125.0);
+    int state = radio.beginFSK(867.5, 15.2, 15.2, 125.0);
 
     if (state == RADIOLIB_ERR_NONE) {
         Serial.println("FSK initialized!");

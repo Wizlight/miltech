@@ -7,12 +7,16 @@ SX1276 radio = new Module(18, 26, 23, RADIOLIB_NC);
 uint8_t packet[64];
 unsigned long counter = 0;
 
+const float FREQUENCY = 867.5;
+const float BW = 125.0;
+const int SF = 12;
+
 void setup() {
     Serial.begin(115200);
 
     SPI.begin(5, 19, 27, 18);
 
-    int state = radio.begin(867.5, 125.0, 6);
+    int state = radio.begin(FREQUENCY, BW, SF);
     radio.implicitHeader(64);
 
     if (state == RADIOLIB_ERR_NONE) {
@@ -26,7 +30,7 @@ void setup() {
 
 void loop() {
     counter++;
-    
+
     memset(packet, ' ', sizeof(packet));
 
     snprintf((char*)packet, sizeof(packet), "PACKET:%lu", counter);
@@ -52,5 +56,5 @@ void loop() {
         Serial.println(state);
     }
 
-    delay(5000);
+    delay(1000);
 }

@@ -24,6 +24,10 @@ bool linkLost = false;
 float lastRSSI = 0;
 float lastSNR = 0;
 
+const float FREQUENCY = 867.5;
+const float BW = 125.0;
+const int SF = 6;
+
 void updateDisplay() {
     display.clearBuffer();
     display.setFont(u8g2_font_6x10_tf);
@@ -65,7 +69,7 @@ void setup() {
 
     SPI.begin(5, 19, 27, 18);
 
-    int state = radio.begin(867.5, 125.0, 6);
+    int state = radio.begin(FREQUENCY, BW, SF);
 
     if (state != RADIOLIB_ERR_NONE) {
         Serial.print("LoRa init failed: ");
