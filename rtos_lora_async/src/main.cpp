@@ -89,7 +89,7 @@ void setup() {
         NULL,
         1,
         NULL,
-        0
+        1
     );
 
     xTaskCreatePinnedToCore(
