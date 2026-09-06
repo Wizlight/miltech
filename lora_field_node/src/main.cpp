@@ -18,7 +18,7 @@ const uint8_t TELEMETRY_POST = 0x01;
 
 uint8_t telemetrySequence = 0;
 
-#define FW_VERSION "0.0.1"
+#define FW_VERSION "1.0.0"
 
 String commandBuffer = "";
 
@@ -29,6 +29,10 @@ const int CURRENT_CFG_VERSION = 2;
 const int DEFAULT_TX_POWER = 10;
 const int DEFAULT_SEND_INTERVAL = 1000;
 const int DEFAULT_MAX_RETRIES = 3;
+
+const char* CONFIG_SLOT_A = "config_a";
+const char* CONFIG_SLOT_B = "config_b";
+const char* CONFIG_META = "config_meta";
 
 struct Config {
     int cfgVersion;
@@ -137,6 +141,15 @@ void printLog() {
     }
 }
 
+void printHelp() {
+    Serial.println("Commands:");
+    Serial.println("  version");
+    Serial.println("  log");
+    Serial.println("  config get");
+    Serial.println("  config set <key> <value>");
+    Serial.println("  config reset");
+}
+
 void printConfig() {
     Serial.print("cfgVersion: ");
     Serial.println(config.cfgVersion);
@@ -158,14 +171,38 @@ void setDefaultConfig() {
     config.maxRetries = DEFAULT_MAX_RETRIES;
 }
 
-void saveConfig() {
-    preferences.begin("config", false);
+void saveConfigToSlot(const char* slot) {
+    preferences.begin(slot, false);
 
     preferences.putInt("cfg_version", config.cfgVersion);
     preferences.putInt("tx_power", config.txPower);
     preferences.putInt("send_interval", config.sendInterval);
     preferences.putInt("max_retries", config.maxRetries);
 
+    preferences.end();
+}
+
+void saveConfig() {
+    preferences.begin(CONFIG_META, true);
+    int activeSlot = preferences.getInt("active", -1);
+    preferences.end();
+
+    int newSlot;
+
+    if (activeSlot == 0) {
+        newSlot = 1;
+    } else {
+        newSlot = 0;
+    }
+
+    if (newSlot == 0) {
+        saveConfigToSlot(CONFIG_SLOT_A);
+    } else {
+        saveConfigToSlot(CONFIG_SLOT_B);
+    }
+
+    preferences.begin(CONFIG_META, false);
+    preferences.putInt("active", newSlot);
     preferences.end();
 }
 
@@ -176,19 +213,15 @@ void resetConfig() {
     logMessage(LOG_INFO, "Config reset to defaults");
 }
 
-void loadConfig() {
-    preferences.begin("config", false);
+bool loadConfigFromSlot(const char* slot) {
+    preferences.begin(slot, true);
 
-    bool configExists = preferences.isKey("cfg_version");
+    if (!preferences.isKey("cfg_version") ||
+        !preferences.isKey("tx_power") ||
+        !preferences.isKey("send_interval")) {
 
-    if (!configExists) {
         preferences.end();
-
-        setDefaultConfig();
-        saveConfig();
-
-        logMessage(LOG_INFO, "Default config saved to NVS");
-        return;
+        return false;
     }
 
     config.cfgVersion =
@@ -200,11 +233,58 @@ void loadConfig() {
     config.sendInterval =
         preferences.getInt("send_interval", DEFAULT_SEND_INTERVAL);
 
+    if (config.cfgVersion >= 2) {
+        if (!preferences.isKey("max_retries")) {
+            preferences.end();
+            return false;
+        }
 
-    // Migration: version 1 -> version 2
+        config.maxRetries =
+            preferences.getInt("max_retries", DEFAULT_MAX_RETRIES);
+    } else {
+        config.maxRetries = DEFAULT_MAX_RETRIES;
+    }
+
+    preferences.end();
+
+    return true;
+}
+
+void loadConfig() {
+    preferences.begin(CONFIG_META, true);
+    int activeSlot = preferences.getInt("active", -1);
+    preferences.end();
+
+    bool loaded = false;
+
+    if (activeSlot == 0) {
+        loaded = loadConfigFromSlot(CONFIG_SLOT_A);
+    }
+
+    if (activeSlot == 1) {
+        loaded = loadConfigFromSlot(CONFIG_SLOT_B);
+    }
+
+    // Одноразово підхоплюємо старий config,
+    // який був у нас до переходу на A/B.
+    if (!loaded && activeSlot == -1) {
+        loaded = loadConfigFromSlot("config");
+
+        if (loaded) {
+            logMessage(LOG_INFO, "Old config loaded");
+        }
+    }
+
+    if (!loaded) {
+        setDefaultConfig();
+        saveConfig();
+
+        logMessage(LOG_INFO, "Default config saved to NVS");
+        return;
+    }
+
+    // Наша стара migration v1 -> v2
     if (config.cfgVersion == 1) {
-        preferences.end();
-
         config.maxRetries = DEFAULT_MAX_RETRIES;
         config.cfgVersion = 2;
 
@@ -214,11 +294,13 @@ void loadConfig() {
         return;
     }
 
-
-    config.maxRetries =
-        preferences.getInt("max_retries", DEFAULT_MAX_RETRIES);
-
-    preferences.end();
+    // Якщо це був старий namespace "config",
+    // переносимо його в нову A/B схему.
+    if (activeSlot == -1) {
+        saveConfig();
+        logMessage(LOG_INFO, "Config moved to A/B storage");
+        return;
+    }
 
     logMessage(LOG_INFO, "Config loaded from NVS");
 }
@@ -307,6 +389,9 @@ void handleCommand(String command) {
     }
     else if (command == "config reset") {
         resetConfig();
+    }
+    else if (command == "help") {
+        printHelp();
     }
     else {
         logMessage(LOG_WARN, "Unknown command: " + command);
