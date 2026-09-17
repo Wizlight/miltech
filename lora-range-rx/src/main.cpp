@@ -6,22 +6,21 @@
 #include <Adafruit_SSD1306.h>
 
 // ======================================================
-// LORA
+// LORA PINS
 // ======================================================
 
-const int LORA_SCK  = 5;
-const int LORA_MISO = 19;
-const int LORA_MOSI = 27;
-const int LORA_CS   = 18;
-const int LORA_RST  = 23;
-const int LORA_DIO0 = 26;
+const int RADIO_SCK_PIN  = 5;
+const int RADIO_MISO_PIN = 19;
+const int RADIO_MOSI_PIN = 27;
+const int RADIO_CS_PIN   = 18;
+const int RADIO_RST_PIN  = 23;
+const int RADIO_DIO0_PIN = 26;
 
 SX1276 radio = new Module(
-  LORA_CS,
-  LORA_DIO0,
-  LORA_RST
+  RADIO_CS_PIN,
+  RADIO_DIO0_PIN,
+  RADIO_RST_PIN
 );
-
 
 // ======================================================
 // RADIO CONFIG
@@ -35,7 +34,6 @@ const int CODING_RATE = 7;
 const int TX_POWER = 17;
 
 const uint8_t SYNC_WORD = 0x12;
-
 
 // ======================================================
 // OLED
@@ -57,7 +55,6 @@ Adafruit_SSD1306 display(
   OLED_RESET
 );
 
-
 // ======================================================
 // STATISTICS
 // ======================================================
@@ -69,7 +66,6 @@ long lastPacketNumber = -1;
 
 float lastRSSI = 0;
 float lastSNR = 0;
-
 
 // ======================================================
 // OLED
@@ -84,8 +80,6 @@ void showWaiting() {
   display.setCursor(0, 0);
   display.println("LoRa RX");
 
-  display.println();
-
   display.print("SF: ");
   display.print(SPREADING_FACTOR);
 
@@ -98,8 +92,7 @@ void showWaiting() {
   display.display();
 }
 
-
-void showPacket(const String& message) {
+void showPacket(long packetNumber) {
   display.clearDisplay();
 
   display.setTextColor(SSD1306_WHITE);
@@ -109,7 +102,7 @@ void showPacket(const String& message) {
   display.println("LoRa RX");
 
   display.print("Packet: ");
-  display.println(message);
+  display.println(packetNumber);
 
   display.print("RSSI: ");
   display.print(lastRSSI, 1);
@@ -128,9 +121,8 @@ void showPacket(const String& message) {
   display.display();
 }
 
-
 // ======================================================
-// EXTRACT PACKET NUMBER
+// PACKET NUMBER
 // ======================================================
 
 long getPacketNumber(const String& message) {
@@ -138,12 +130,10 @@ long getPacketNumber(const String& message) {
     return -1;
   }
 
-  String number =
-    message.substring(5);
+  String number = message.substring(5);
 
   return number.toInt();
 }
-
 
 // ======================================================
 // SETUP
@@ -154,35 +144,25 @@ void setup() {
 
   delay(1000);
 
-
-  // ---------- OLED ----------
-
+  // OLED
   Wire.begin(MY_OLED_SDA, MY_OLED_SCL);
 
-  if (!display.begin(
-        SSD1306_SWITCHCAPVCC,
-        OLED_ADDRESS
-      )) {
-
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
     Serial.println("OLED init failed");
 
     while (true) {
     }
   }
 
-
-  // ---------- SPI ----------
-
+  // SPI
   SPI.begin(
-    LORA_SCK,
-    LORA_MISO,
-    LORA_MOSI,
-    LORA_CS
+    RADIO_SCK_PIN,
+    RADIO_MISO_PIN,
+    RADIO_MOSI_PIN,
+    RADIO_CS_PIN
   );
 
-
-  // ---------- RADIO ----------
-
+  // LoRa
   int state = radio.begin(
     FREQUENCY,
     BANDWIDTH,
@@ -194,18 +174,16 @@ void setup() {
 
   if (state == RADIOLIB_ERR_NONE) {
     Serial.println("Radio init OK");
-
     showWaiting();
   } else {
     Serial.print("Radio init FAIL: ");
     Serial.println(state);
 
     display.clearDisplay();
-
     display.setTextColor(SSD1306_WHITE);
     display.setTextSize(1);
-    display.setCursor(0, 0);
 
+    display.setCursor(0, 0);
     display.println("RADIO ERROR");
     display.println(state);
 
@@ -215,7 +193,6 @@ void setup() {
     }
   }
 }
-
 
 // ======================================================
 // LOOP
@@ -227,25 +204,22 @@ void loop() {
   int state = radio.receive(message);
 
   if (state == RADIOLIB_ERR_NONE) {
-
     receivedCount++;
 
     lastRSSI = radio.getRSSI();
     lastSNR = radio.getSNR();
 
+    long packetNumber = getPacketNumber(message);
 
-    // ---------- PACKET LOSS ----------
-
-    long packetNumber =
-      getPacketNumber(message);
+    // --------------------------------------------------
+    // Рахуємо пропущені пакети
+    // --------------------------------------------------
 
     if (packetNumber >= 0) {
-
       if (
         lastPacketNumber >= 0 &&
         packetNumber > lastPacketNumber + 1
       ) {
-
         lostCount +=
           packetNumber - lastPacketNumber - 1;
       }
@@ -253,16 +227,17 @@ void loop() {
       lastPacketNumber = packetNumber;
     }
 
-
-    // ---------- SERIAL ----------
+    // --------------------------------------------------
+    // SERIAL
+    // --------------------------------------------------
 
     Serial.print(message);
 
     Serial.print(" | RSSI ");
-    Serial.print(lastRSSI);
+    Serial.print(lastRSSI, 1);
 
     Serial.print(" dBm | SNR ");
-    Serial.print(lastSNR);
+    Serial.print(lastSNR, 1);
 
     Serial.print(" dB | RX ");
     Serial.print(receivedCount);
@@ -270,19 +245,18 @@ void loop() {
     Serial.print(" | Lost ");
     Serial.println(lostCount);
 
+    // --------------------------------------------------
+    // OLED
+    // --------------------------------------------------
 
-    // ---------- OLED ----------
-
-    showPacket(message);
+    showPacket(packetNumber);
   }
 
   else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
-
     Serial.println("CRC error");
   }
 
   else {
-
     Serial.print("RX error: ");
     Serial.println(state);
   }

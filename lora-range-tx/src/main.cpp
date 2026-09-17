@@ -6,22 +6,21 @@
 #include <Adafruit_SSD1306.h>
 
 // ======================================================
-// LORA
+// LORA PINS
 // ======================================================
 
-const int LORA_SCK  = 5;
-const int LORA_MISO = 19;
-const int LORA_MOSI = 27;
-const int LORA_CS   = 18;
-const int LORA_RST  = 23;
-const int LORA_DIO0 = 26;
+const int RADIO_SCK_PIN  = 5;
+const int RADIO_MISO_PIN = 19;
+const int RADIO_MOSI_PIN = 27;
+const int RADIO_CS_PIN   = 18;
+const int RADIO_RST_PIN  = 23;
+const int RADIO_DIO0_PIN = 26;
 
 SX1276 radio = new Module(
-  LORA_CS,
-  LORA_DIO0,
-  LORA_RST
+  RADIO_CS_PIN,
+  RADIO_DIO0_PIN,
+  RADIO_RST_PIN
 );
-
 
 // ======================================================
 // RADIO CONFIG
@@ -36,6 +35,8 @@ const int TX_POWER = 17;
 
 const uint8_t SYNC_WORD = 0x12;
 
+// 15 секунд між передачами
+const unsigned long SEND_INTERVAL = 15000;
 
 // ======================================================
 // OLED
@@ -57,33 +58,58 @@ Adafruit_SSD1306 display(
   OLED_RESET
 );
 
-
 // ======================================================
 // STATE
 // ======================================================
 
 unsigned long packetNumber = 0;
+unsigned long lastSentTime = 0;
 
+// ======================================================
+// TIME FORMAT
+// ======================================================
+
+String formatTime(unsigned long milliseconds) {
+  unsigned long totalSeconds = milliseconds / 1000;
+
+  int hours = totalSeconds / 3600;
+  int minutes = (totalSeconds % 3600) / 60;
+  int seconds = totalSeconds % 60;
+
+  char buffer[9];
+
+  sprintf(
+    buffer,
+    "%02d:%02d:%02d",
+    hours,
+    minutes,
+    seconds
+  );
+
+  return String(buffer);
+}
 
 // ======================================================
 // OLED
 // ======================================================
 
-void showStatus(const String& status) {
+void showStatus(
+  const String& status,
+  unsigned long sentPacket
+) {
   display.clearDisplay();
 
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
 
   display.setCursor(0, 0);
+
   display.println("LoRa TX");
 
-  display.println();
-
-  display.print("SF: ");
+  display.print("SF");
   display.print(SPREADING_FACTOR);
 
-  display.print("  BW: ");
+  display.print(" BW");
   display.println((int)BANDWIDTH);
 
   display.print("Power: ");
@@ -91,16 +117,16 @@ void showStatus(const String& status) {
   display.println(" dBm");
 
   display.print("Packet: ");
-  display.println(packetNumber);
+  display.println(sentPacket);
 
-  display.println();
+  display.print("Last: ");
+  display.println(formatTime(lastSentTime));
 
   display.print("Status: ");
   display.println(status);
 
   display.display();
 }
-
 
 // ======================================================
 // SETUP
@@ -111,8 +137,7 @@ void setup() {
 
   delay(1000);
 
-  // ---------- OLED ----------
-
+  // OLED
   Wire.begin(MY_OLED_SDA, MY_OLED_SCL);
 
   if (!display.begin(
@@ -134,19 +159,15 @@ void setup() {
   display.println("Starting TX...");
   display.display();
 
-
-  // ---------- SPI ----------
-
+  // SPI
   SPI.begin(
-    LORA_SCK,
-    LORA_MISO,
-    LORA_MOSI,
-    LORA_CS
+    RADIO_SCK_PIN,
+    RADIO_MISO_PIN,
+    RADIO_MOSI_PIN,
+    RADIO_CS_PIN
   );
 
-
-  // ---------- RADIO ----------
-
+  // LoRa
   int state = radio.begin(
     FREQUENCY,
     BANDWIDTH,
@@ -158,27 +179,21 @@ void setup() {
 
   if (state == RADIOLIB_ERR_NONE) {
     Serial.println("Radio init OK");
-
-    showStatus("READY");
   } else {
     Serial.print("Radio init FAIL: ");
     Serial.println(state);
-
-    showStatus("RADIO ERROR");
 
     while (true) {
     }
   }
 }
 
-
 // ======================================================
 // LOOP
 // ======================================================
 
 void loop() {
-  String message =
-    "ping " + String(packetNumber);
+  String message = "ping " + String(packetNumber);
 
   Serial.print("Sending: ");
   Serial.println(message);
@@ -186,17 +201,30 @@ void loop() {
   int state = radio.transmit(message);
 
   if (state == RADIOLIB_ERR_NONE) {
-    Serial.println("TX OK");
 
-    showStatus("SENT");
+    // Запам'ятовуємо момент успішної передачі
+    lastSentTime = millis();
+
+    Serial.print("TX OK at ");
+    Serial.println(formatTime(lastSentTime));
+
+    showStatus(
+      "SENT",
+      packetNumber
+    );
+
   } else {
+
     Serial.print("TX ERROR: ");
     Serial.println(state);
 
-    showStatus("ERROR");
+    showStatus(
+      "ERROR",
+      packetNumber
+    );
   }
 
   packetNumber++;
 
-  delay(2000);
+  delay(SEND_INTERVAL);
 }
