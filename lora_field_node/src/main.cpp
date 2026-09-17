@@ -176,6 +176,10 @@ void saveConfigToSlot(const char* slot) {
 
     preferences.putInt("cfg_version", config.cfgVersion);
     preferences.putInt("tx_power", config.txPower);
+
+    Serial.println("CUT POWER NOW");
+    delay(5000);
+
     preferences.putInt("send_interval", config.sendInterval);
     preferences.putInt("max_retries", config.maxRetries);
 
