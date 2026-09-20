@@ -1,39 +1,14 @@
 #include <Arduino.h>
-#include <SPI.h>
 #include <Wire.h>
-#include <RadioLib.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
 // ======================================================
-// LORA PINS
+// BUTTONS
 // ======================================================
 
-const int RADIO_SCK_PIN  = 5;
-const int RADIO_MISO_PIN = 19;
-const int RADIO_MOSI_PIN = 27;
-const int RADIO_CS_PIN   = 18;
-const int RADIO_RST_PIN  = 23;
-const int RADIO_DIO0_PIN = 26;
-
-SX1276 radio = new Module(
-  RADIO_CS_PIN,
-  RADIO_DIO0_PIN,
-  RADIO_RST_PIN
-);
-
-// ======================================================
-// RADIO CONFIG
-// ======================================================
-
-const float FREQUENCY = 915.0;
-const float BANDWIDTH = 125.0;
-
-const int SPREADING_FACTOR = 9;
-const int CODING_RATE = 7;
-const int TX_POWER = 17;
-
-const uint8_t SYNC_WORD = 0x12;
+const int BUTTON_MODE_PIN = 4;
+const int BUTTON_SYNC_PIN = 13;
 
 // ======================================================
 // OLED
@@ -56,83 +31,74 @@ Adafruit_SSD1306 display(
 );
 
 // ======================================================
-// STATISTICS
+// PROFILES
 // ======================================================
 
-unsigned long receivedCount = 0;
-unsigned long lostCount = 0;
+enum RadioProfile {
+  NORMAL,
+  FAST,
+  LONG_RANGE
+};
 
-long lastPacketNumber = -1;
-
-float lastRSSI = 0;
-float lastSNR = 0;
-
-// ======================================================
-// OLED
-// ======================================================
-
-void showWaiting() {
-  display.clearDisplay();
-
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-
-  display.setCursor(0, 0);
-  display.println("LoRa RX");
-
-  display.print("SF: ");
-  display.print(SPREADING_FACTOR);
-
-  display.print("  BW: ");
-  display.println((int)BANDWIDTH);
-
-  display.println();
-  display.println("Waiting...");
-
-  display.display();
-}
-
-void showPacket(long packetNumber) {
-  display.clearDisplay();
-
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-
-  display.setCursor(0, 0);
-  display.println("LoRa RX");
-
-  display.print("Packet: ");
-  display.println(packetNumber);
-
-  display.print("RSSI: ");
-  display.print(lastRSSI, 1);
-  display.println(" dBm");
-
-  display.print("SNR: ");
-  display.print(lastSNR, 1);
-  display.println(" dB");
-
-  display.print("RX: ");
-  display.print(receivedCount);
-
-  display.print(" Lost: ");
-  display.println(lostCount);
-
-  display.display();
-}
+RadioProfile selectedProfile = NORMAL;
 
 // ======================================================
-// PACKET NUMBER
+// BUTTON STATE
 // ======================================================
 
-long getPacketNumber(const String& message) {
-  if (!message.startsWith("ping ")) {
-    return -1;
+bool lastModeState = HIGH;
+bool lastSyncState = HIGH;
+
+unsigned long lastModePress = 0;
+unsigned long lastSyncPress = 0;
+
+const unsigned long DEBOUNCE_MS = 200;
+
+// ======================================================
+// HELPERS
+// ======================================================
+
+const char* getProfileName() {
+  switch (selectedProfile) {
+    case NORMAL:
+      return "NORMAL";
+
+    case FAST:
+      return "FAST";
+
+    case LONG_RANGE:
+      return "LONG";
   }
 
-  String number = message.substring(5);
+  return "?";
+}
 
-  return number.toInt();
+void showScreen(const char* action) {
+  display.clearDisplay();
+
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+
+  display.setCursor(0, 0);
+
+  display.println("BUTTON TEST");
+  display.println();
+
+  display.print("MODE: GPIO");
+  display.println(BUTTON_MODE_PIN);
+
+  display.print("SYNC: GPIO");
+  display.println(BUTTON_SYNC_PIN);
+
+  display.println();
+
+  display.print("Profile: ");
+  display.println(getProfileName());
+
+  display.print("Action: ");
+  display.println(action);
+
+  display.display();
 }
 
 // ======================================================
@@ -142,56 +108,30 @@ long getPacketNumber(const String& message) {
 void setup() {
   Serial.begin(115200);
 
-  delay(1000);
+  pinMode(BUTTON_MODE_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_SYNC_PIN, INPUT_PULLUP);
 
-  // OLED
-  Wire.begin(MY_OLED_SDA, MY_OLED_SCL);
+  Wire.begin(
+    MY_OLED_SDA,
+    MY_OLED_SCL
+  );
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+  if (!display.begin(
+        SSD1306_SWITCHCAPVCC,
+        OLED_ADDRESS
+      )) {
+
     Serial.println("OLED init failed");
 
     while (true) {
     }
   }
 
-  // SPI
-  SPI.begin(
-    RADIO_SCK_PIN,
-    RADIO_MISO_PIN,
-    RADIO_MOSI_PIN,
-    RADIO_CS_PIN
-  );
+  Serial.println("Button test started");
+  Serial.println("MODE = GPIO4");
+  Serial.println("SYNC = GPIO13");
 
-  // LoRa
-  int state = radio.begin(
-    FREQUENCY,
-    BANDWIDTH,
-    SPREADING_FACTOR,
-    CODING_RATE,
-    SYNC_WORD,
-    TX_POWER
-  );
-
-  if (state == RADIOLIB_ERR_NONE) {
-    Serial.println("Radio init OK");
-    showWaiting();
-  } else {
-    Serial.print("Radio init FAIL: ");
-    Serial.println(state);
-
-    display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
-    display.setTextSize(1);
-
-    display.setCursor(0, 0);
-    display.println("RADIO ERROR");
-    display.println(state);
-
-    display.display();
-
-    while (true) {
-    }
-  }
+  showScreen("READY");
 }
 
 // ======================================================
@@ -199,65 +139,47 @@ void setup() {
 // ======================================================
 
 void loop() {
-  String message;
+  bool modeState = digitalRead(BUTTON_MODE_PIN);
+  bool syncState = digitalRead(BUTTON_SYNC_PIN);
 
-  int state = radio.receive(message);
+  // MODE
+  if (
+    modeState == LOW &&
+    lastModeState == HIGH &&
+    millis() - lastModePress > DEBOUNCE_MS
+  ) {
+    lastModePress = millis();
 
-  if (state == RADIOLIB_ERR_NONE) {
-    receivedCount++;
-
-    lastRSSI = radio.getRSSI();
-    lastSNR = radio.getSNR();
-
-    long packetNumber = getPacketNumber(message);
-
-    // --------------------------------------------------
-    // Рахуємо пропущені пакети
-    // --------------------------------------------------
-
-    if (packetNumber >= 0) {
-      if (
-        lastPacketNumber >= 0 &&
-        packetNumber > lastPacketNumber + 1
-      ) {
-        lostCount +=
-          packetNumber - lastPacketNumber - 1;
-      }
-
-      lastPacketNumber = packetNumber;
+    if (selectedProfile == NORMAL) {
+      selectedProfile = FAST;
+    }
+    else if (selectedProfile == FAST) {
+      selectedProfile = LONG_RANGE;
+    }
+    else {
+      selectedProfile = NORMAL;
     }
 
-    // --------------------------------------------------
-    // SERIAL
-    // --------------------------------------------------
+    Serial.print("MODE -> ");
+    Serial.println(getProfileName());
 
-    Serial.print(message);
-
-    Serial.print(" | RSSI ");
-    Serial.print(lastRSSI, 1);
-
-    Serial.print(" dBm | SNR ");
-    Serial.print(lastSNR, 1);
-
-    Serial.print(" dB | RX ");
-    Serial.print(receivedCount);
-
-    Serial.print(" | Lost ");
-    Serial.println(lostCount);
-
-    // --------------------------------------------------
-    // OLED
-    // --------------------------------------------------
-
-    showPacket(packetNumber);
+    showScreen("MODE");
   }
 
-  else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
-    Serial.println("CRC error");
+  // SYNC
+  if (
+    syncState == LOW &&
+    lastSyncState == HIGH &&
+    millis() - lastSyncPress > DEBOUNCE_MS
+  ) {
+    lastSyncPress = millis();
+
+    Serial.print("SYNC -> ");
+    Serial.println(getProfileName());
+
+    showScreen("SYNC");
   }
 
-  else {
-    Serial.print("RX error: ");
-    Serial.println(state);
-  }
+  lastModeState = modeState;
+  lastSyncState = syncState;
 }
