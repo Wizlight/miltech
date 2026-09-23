@@ -21,8 +21,11 @@ const int PWM_RESOLUTION = 16;
 const char* WIFI_SSID = "esp32";
 const char* WIFI_PASSWORD = "12345678";
 
+IPAddress apIP(192, 168, 10, 1);
+IPAddress gateway(192, 168, 10, 1);
+IPAddress subnet(255, 255, 255, 0);
+
 WebServer server(80);
-bool webStarted = false;
 
 enum SystemState {
     SAFE,
@@ -50,6 +53,7 @@ enum InitState {
     INIT_CONFIG,
     INIT_BUTTON,
     INIT_COMPONENTS,
+    INIT_WEB,
     INIT_DONE,
     INIT_FAILED
 };
@@ -68,57 +72,16 @@ PwmCommand lastPwmCommand = PWM_NONE;
 unsigned long armDelayMs = 0;
 unsigned long countdownStartedAt = 0;
 
-String getWebPage() {
-    return R"(
-        <!DOCTYPE html>
-        <html>
-        <body>
-            <h2>ESP32 Safe Trigger Simulator</h2>
-
-            <p><a href="/start"><button>Start</button></a></p>
-            <p><a href="/stop"><button>Stop</button></a></p>
-            <p><a href="/trigger"><button>Trigger</button></a></p>
-        </body>
-        </html>
-    )";
+String getStateName() {
+    switch (state) {
+        case SAFE: return "SAFE";
+        case COUNTDOWN: return "COUNTDOWN";
+        case ARMED: return "ARMED";
+        case TRIGGERED: return "TRIGGERED";
+        case ERROR: return "ERROR";
+        default: return "UNKNOWN";
+    }
 }
-
-void startWebServer() {
-    WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
-
-    Serial.print("Web address: ");
-    Serial.println(WiFi.softAPIP());
-
-    server.on("/", []() {
-        server.send(200, "text/html", getWebPage());
-    });
-
-    server.on("/start", []() {
-        event = EVENT_START;
-        server.send(200, "text/html", getWebPage());
-    });
-
-    server.on("/stop", []() {
-        event = EVENT_STOP;
-        server.send(200, "text/html", getWebPage());
-    });
-
-    server.on("/trigger", []() {
-        event = EVENT_TRIGGER;
-        server.send(200, "text/html", getWebPage());
-    });
-
-    server.begin();
-
-    webStarted = true;
-
-    Serial.println("Web server started");
-}
-
-struct SensorData {
-    float voltage;
-    bool sensorOk;
-};
 
 void enterFailSafe(const char* reason) {
     if (state == ERROR) {
@@ -131,6 +94,246 @@ void enterFailSafe(const char* reason) {
     event = EVENT_NONE;
     state = ERROR;
 }
+
+bool startWebServer() {
+    if (!WiFi.softAPConfig(apIP, gateway, subnet)) {
+        return false;
+    }
+
+    if (!WiFi.softAP(WIFI_SSID, WIFI_PASSWORD)) {
+        return false;
+    }
+
+    Serial.print("AP IP: ");
+    Serial.println(WiFi.softAPIP());
+
+    server.on("/", []() {
+        String html = R"rawliteral(
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Safe Simulation Control</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      color: #f1f5f9;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+      backdrop-filter: blur(10px);
+    }
+
+    h1 {
+      margin-top: 0;
+      margin-bottom: 8px;
+      font-size: 24px;
+      text-align: center;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #cbd5e1;
+      margin-bottom: 24px;
+      font-size: 14px;
+    }
+
+    .status-box {
+      background: rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 18px;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .status-label {
+      font-size: 13px;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+    }
+
+    .status-value {
+      font-size: 28px;
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+
+    .status-safe { color: #22c55e; }
+    .status-countdown { color: #f59e0b; }
+    .status-armed { color: #ef4444; }
+    .status-triggered { color: #e11d48; }
+    .status-error { color: #a855f7; }
+
+    .buttons {
+      display: grid;
+      gap: 12px;
+    }
+
+    button {
+      border: none;
+      border-radius: 14px;
+      padding: 16px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: transform 0.1s ease, opacity 0.2s ease;
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    .btn-start {
+      background: #22c55e;
+      color: white;
+    }
+
+    .btn-stop {
+      background: #f59e0b;
+      color: white;
+    }
+
+    .btn-trigger {
+      background: #ef4444;
+      color: white;
+    }
+
+    .footer {
+      margin-top: 18px;
+      text-align: center;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    .hint {
+      margin-top: 16px;
+      padding: 12px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      font-size: 13px;
+      color: #cbd5e1;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Safe Simulation</h1>
+    <div class="subtitle">ESP32 control panel</div>
+
+    <div class="status-box">
+      <div class="status-label">Поточний стан</div>
+      <div id="state" class="status-value">LOADING...</div>
+    </div>
+
+    <div class="buttons">
+      <button class="btn-start" onclick="sendCommand('/start')">START</button>
+      <button class="btn-stop" onclick="sendCommand('/stop')">STOP</button>
+      <button class="btn-trigger" onclick="sendCommand('/trigger')">ПІДРИВ / СПРАЦЮВАННЯ</button>
+    </div>
+
+    <div class="hint">
+      Після START запускається таймер безпеки.  
+      У стані ARMED можна виконати trigger.
+    </div>
+
+    <div class="footer">
+      Auto refresh: 1s
+    </div>
+  </div>
+
+  <script>
+    function applyStateStyle(state) {
+      const el = document.getElementById('state');
+      el.className = 'status-value';
+
+      if (state === 'SAFE') el.classList.add('status-safe');
+      else if (state === 'COUNTDOWN') el.classList.add('status-countdown');
+      else if (state === 'ARMED') el.classList.add('status-armed');
+      else if (state === 'TRIGGERED') el.classList.add('status-triggered');
+      else if (state === 'ERROR') el.classList.add('status-error');
+    }
+
+    function updateStatus() {
+      fetch('/status')
+        .then(response => response.json())
+        .then(data => {
+          const state = data.state || 'UNKNOWN';
+          document.getElementById('state').textContent = state;
+          applyStateStyle(state);
+        })
+        .catch(() => {
+          document.getElementById('state').textContent = 'OFFLINE';
+        });
+    }
+
+    function sendCommand(url) {
+      fetch(url, { method: 'POST' })
+        .then(() => setTimeout(updateStatus, 200));
+    }
+
+    updateStatus();
+    setInterval(updateStatus, 1000);
+  </script>
+</body>
+</html>
+)rawliteral";
+
+        server.send(200, "text/html", html);
+    });
+
+    server.on("/status", []() {
+        String json = "{\"state\":\"" + getStateName() + "\"}";
+        server.send(200, "application/json", json);
+    });
+
+    server.on("/start", HTTP_POST, []() {
+        event = EVENT_START;
+        server.send(200, "text/plain", "OK");
+    });
+
+    server.on("/stop", HTTP_POST, []() {
+        event = EVENT_STOP;
+        server.send(200, "text/plain", "OK");
+    });
+
+    server.on("/trigger", HTTP_POST, []() {
+        event = EVENT_TRIGGER;
+        server.send(200, "text/plain", "OK");
+    });
+
+    server.begin();
+
+    Serial.println("Web server started");
+    Serial.print("Open: http://");
+    Serial.println(WiFi.softAPIP());
+
+    return true;
+}
+
+struct SensorData {
+    float voltage;
+    bool sensorOk;
+};
 
 SensorData readSensors() {
     SensorData data;
@@ -299,16 +502,24 @@ void updateInitStateMachine() {
             }
             break;
 
-        case INIT_COMPONENTS:
+       case INIT_COMPONENTS:
             if (checkComponents()) {
                 Serial.println("INIT: components OK");
-                initState = INIT_DONE;
+                initState = INIT_WEB;
             } else {
                 Serial.println("INIT: components FAILED");
                 initState = INIT_FAILED;
             }
             break;
-
+        case INIT_WEB:
+            if (startWebServer()) {
+                Serial.println("INIT: web server OK");
+                initState = INIT_DONE;
+            } else {
+                Serial.println("INIT: web server FAILED");
+                initState = INIT_FAILED;
+            }
+            break;
         case INIT_DONE:
             break;
 
@@ -479,9 +690,7 @@ void loop() {
         return;
     }
 
-    if (!webStarted) {
-        startWebServer();
-    }
+    server.handleClient();
 
     checkSensors();
 
@@ -489,8 +698,6 @@ void loop() {
         updateLed();
         return;
     }
-
-    server.handleClient();
 
     readCommand();
     readPwmCommand();
