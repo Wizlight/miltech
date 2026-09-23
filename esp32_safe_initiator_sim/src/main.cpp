@@ -7,7 +7,7 @@
 Preferences preferences;
 
 const int CONFIG_VERSION = 1;
-const unsigned long DEFAULT_ARM_DELAY = 10000;
+const unsigned long DEFAULT_ARM_DELAY = 300000;
 const int BUTTON_PIN = 32;
 const int LED_PIN = 23;
 
